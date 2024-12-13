@@ -18,9 +18,9 @@ from pyarrow.flight import ClientMiddleware, ClientMiddlewareFactory
 from pyarrow.types import is_dictionary
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, stop_after_delay, wait_exponential
 
-from ..version import __version__
 from .arrow_endpoint_version import ArrowEndpointVersion
 from .arrow_info import ArrowInfo
+from ..version import __version__
 
 
 class GdsArrowClient:
@@ -96,27 +96,27 @@ class GdsArrowClient:
 
         if auth:
             self._auth_middleware = AuthMiddleware(auth)
+            if not self._user_agent:
+                self._user_agent = f"neo4j-graphdatascience-v{__version__} pyarrow-v{arrow_version}"
 
         self._flight_client = self._instantiate_flight_client()
 
     def _instantiate_flight_client(self) -> flight.FlightClient:
-        location = (
-            flight.Location.for_grpc_tls(self._host, self._port)
-            if self._encrypted
-            else flight.Location.for_grpc_tcp(self._host, self._port)
-        )
+        print("inside instantiate_flight_client")
+        location = flight.Location.for_grpc_tls(self._host, self._port) if self._encrypted else flight.Location.for_grpc_tcp(self._host, self._port)
+        print("after flight location")
         client_options: dict[str, Any] = {"disable_server_verification": self._disable_server_verification}
+        print("after client options init")
         if self._auth:
             user_agent = f"neo4j-graphdatascience-v{__version__} pyarrow-v{arrow_version}"
             if self._user_agent:
                 user_agent = self._user_agent
-
-            client_options["middleware"] = [
-                AuthFactory(self._auth_middleware),
-                UserAgentFactory(useragent=user_agent),
-            ]
+            client_options["middleware"] = [AuthFactory(self._auth_middleware), UserAgentFactory(useragent=user_agent)]
+            print("self. auth middleware")
         if self._tls_root_certs:
             client_options["tls_root_certs"] = self._tls_root_certs
+            print("self.tls roots")
+        print("returning flight client")
         return flight.FlightClient(location, **client_options)
 
     def connection_info(self) -> tuple[str, int]:
@@ -565,7 +565,9 @@ class GdsArrowClient:
         Lazy client construction to help pickle this class because a PyArrow
         FlightClient is not serializable.
         """
+        print("checking flight client")
         if not hasattr(self, "_flight_client") or not self._flight_client:
+            print("instantiating flight client")
             self._flight_client = self._instantiate_flight_client()
         return self._flight_client
 
@@ -605,6 +607,7 @@ class GdsArrowClient:
 
         client = self._client()
         put_stream, ack_stream = client.do_put(upload_descriptor, batches[0].schema)
+
 
         @retry(
             stop=(stop_after_delay(10) | stop_after_attempt(5)),
@@ -653,9 +656,9 @@ class GdsArrowClient:
             }
 
         ticket = flight.Ticket(json.dumps(payload).encode("utf-8"))
-
+        client = self._client()
         try:
-            get = self._flight_client.do_get(ticket)
+            get = client.do_get(ticket)
             arrow_table = get.read_all()
         except Exception as e:
             self.handle_flight_error(e)
